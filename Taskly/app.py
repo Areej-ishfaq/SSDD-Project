@@ -18,7 +18,6 @@ from markupsafe import escape
 from flask_talisman import Talisman
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from urllib.parse import urlparse, urljoin  # Added for secure redirects
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
@@ -44,22 +43,7 @@ Talisman(app, content_security_policy={
     'script-src': ["'self'", "https://cdn.jsdelivr.net"]
 })
 
-# =============================================
-# Security Helper Functions
-# =============================================
-def is_safe_redirect_url(target):
-    """Check if a redirect URL is safe (same domain only)."""
-    if not target:
-        return False
-    ref_url = urlparse(request.host_url)
-    test_url = urlparse(urljoin(request.host_url, target))
-    return (test_url.scheme in ('http', 'https') and 
-            ref_url.netloc == test_url.netloc and
-            not test_url.path.startswith('//'))
 
-# =============================================
-# Database Models
-# =============================================
 class User(db.Model, UserMixin):
     """Model for application users."""
     id = db.Column(db.Integer, primary_key=True)
@@ -67,6 +51,7 @@ class User(db.Model, UserMixin):
     email = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     tasks = db.relationship('Task', backref='owner', lazy=True)
+
 
 class Task(db.Model):
     """Model for user tasks."""
@@ -80,38 +65,39 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-# =============================================
-# Forms
-# =============================================
+
 class RegistrationForm(FlaskForm):
     """Form for registering new users."""
     username = StringField('Username', validators=[
-        DataRequired(), Length(min=4, max=20),
-        Regexp(r'^\w+$', message='Only letters, numbers and underscores')
+        DataRequired(), Length(min=4, max=20)
     ])
     email = StringField('Email', validators=[DataRequired(), Email()])
     password = PasswordField('Password', validators=[
         DataRequired(), Length(min=8),
         EqualTo('confirm_password', message='Passwords must match'),
         Regexp(r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$',
-               message='Must contain letters and numbers')
+               message='Password must contain letters and numbers.')
     ])
-    confirm_password = PasswordField('Confirm Password')
+    confirm_password = PasswordField('Confirm Password', validators=[DataRequired()])
     submit = SubmitField('Register')
 
     def validate_username(self, username):
+        if not re.match(r'^\w+$', username.data):
+            raise ValidationError('Username must contain only letters, numbers, and underscores')
         if User.query.filter_by(username=username.data).first():
-            raise ValidationError('Username taken')
+            raise ValidationError('Username already taken!')
 
     def validate_email(self, email):
         if User.query.filter_by(email=email.data).first():
-            raise ValidationError('Email already registered')
+            raise ValidationError('Email already registered!')
+
 
 class LoginForm(FlaskForm):
     """Form for user login."""
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
+
 
 class TaskForm(FlaskForm):
     """Form for task creation and update."""
@@ -125,21 +111,26 @@ class TaskForm(FlaskForm):
     priority = SelectField('Priority', choices=[
         ('High', 'High'), ('Medium', 'Medium'), ('Low', 'Low')
     ])
-    start_date = DateField('Start Date', format='%Y-%m-%d', default=date.today)
-    due_date = DateField('Due Date', format='%Y-%m-%d')
+    start_date = DateField('Start Date', format='%Y-%m-%d', default=date.today, validators=[DataRequired()])
+    due_date = DateField('Due Date', format='%Y-%m-%d', validators=[DataRequired()])
     submit = SubmitField('Save Task')
 
     def validate_due_date(self, due_date):
         if self.start_date.data and due_date.data < self.start_date.data:
-            raise ValidationError('Due date must be after start date')
+            raise ValidationError('Due date cannot be before start date.')
 
-# =============================================
-# Routes
-# =============================================
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user by ID."""
+    return User.query.get(int(user_id))
+
+
 @app.route('/')
 def home():
     """Render home page."""
     return render_template('home.html')
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -154,9 +145,10 @@ def register():
         )
         db.session.add(user)
         db.session.commit()
-        flash('Registration successful! Please login.', 'success')
+        flash('Registered successfully! Please login.', 'success')
         return redirect(url_for('login'))
     return render_template('register.html', form=form)
+
 
 @app.route('/login', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
@@ -168,35 +160,50 @@ def login():
         if user and check_password_hash(user.password, form.password.data):
             login_user(user)
             next_page = request.args.get('next')
-            # SECURE REDIRECT - FIXED VULNERABILITY
-            if not is_safe_redirect_url(next_page):
-                next_page = url_for('tasks')
-            return redirect(next_page)
-        flash('Invalid credentials', 'danger')
+            return redirect(next_page or url_for('tasks'))
+        flash('Invalid username or password.', 'danger')
     return render_template('login.html', form=form)
 
-@app.route('/logout')
+
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     """Logout current user."""
     logout_user()
-    flash('Logged out successfully', 'info')
+    flash('You have been logged out.', 'info')
     return redirect(url_for('home'))
 
-@app.route('/tasks')
+
+@app.route('/tasks', methods=['GET', 'POST'])
 @login_required
 def tasks():
     """Display and create tasks."""
     form = TaskForm()
-    user_tasks = Task.query.filter_by(user_id=current_user.id).order_by(Task.due_date).all()
+    if form.validate_on_submit():
+        task = Task(
+            title=escape(form.title.data.strip()),
+            description=escape(form.description.data.strip()) if form.description.data else '',
+            status=form.status.data,
+            priority=form.priority.data,
+            start_date=form.start_date.data,
+            due_date=form.due_date.data,
+            owner=current_user
+        )
+        db.session.add(task)
+        db.session.commit()
+        flash("Task added!", "success")
+        return redirect(url_for('tasks'))
+
+    user_tasks = Task.query.filter_by(user_id=current_user.id).order_by(Task.due_date.asc()).all()
     return render_template('tasks.html', form=form, tasks=user_tasks)
+
 
 @app.route('/edit/<int:task_id>', methods=['GET', 'POST'])
 @login_required
 def edit_task(task_id):
     """Edit a specific task."""
     task = Task.query.get_or_404(task_id)
-    if task.user_id != current_user.id:
+    if task.owner != current_user:
         abort(403)
     form = TaskForm(obj=task)
     if form.validate_on_submit():
@@ -207,49 +214,56 @@ def edit_task(task_id):
         task.start_date = form.start_date.data
         task.due_date = form.due_date.data
         db.session.commit()
-        flash('Task updated', 'success')
+        flash("Task updated!", "success")
         return redirect(url_for('tasks'))
     return render_template('edit_task.html', form=form, task=task)
+
 
 @app.route('/delete/<int:task_id>', methods=['POST'])
 @login_required
 def delete_task(task_id):
     """Delete a task by ID."""
     task = Task.query.get_or_404(task_id)
-    if task.user_id != current_user.id:
+    if task.owner != current_user:
         abort(403)
     db.session.delete(task)
     db.session.commit()
-    flash('Task deleted', 'info')
+    flash("Task deleted.", "info")
     return redirect(url_for('tasks'))
 
-# =============================================
-# Error Handlers & Context
-# =============================================
+
 @app.errorhandler(403)
-def forbidden(e):
+def forbidden(_):
+    """403 Forbidden error handler."""
     return render_template('403.html'), 403
 
+
 @app.errorhandler(404)
-def not_found(e):
+def not_found(_):
+    """404 Not Found error handler."""
     return render_template('404.html'), 404
 
+
 @app.errorhandler(429)
-def ratelimit_handler(e):
+def ratelimit_handler(_):
+    """429 Too Many Requests error handler."""
     return render_template('429.html'), 429
 
+
 @app.errorhandler(500)
-def server_error(e):
+def server_error(_):
+    """500 Internal Server Error handler."""
     return render_template('500.html'), 500
+
 
 @app.context_processor
 def inject_now():
+    """Inject current year into all templates."""
     return {'current_year': datetime.now(timezone.utc).year}
 
-# =============================================
-# Application Startup
-# =============================================
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=os.getenv('FLASK_DEBUG', 'false').lower() == 'true')
+    app.run(debug=os.getenv("FLASK_DEBUG", "false").lower() == "true") #comment this line when running locally
+    # app.run(debug=True) #comment out this line when running locally
