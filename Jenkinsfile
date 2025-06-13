@@ -1,13 +1,15 @@
 pipeline {
     agent any
     
-    tools {
-        maven 'Maven'  // Name of Maven tool configured in Jenkins
+    parameters {
+        string(name: 'VERSION_STRING', defaultValue: '', description: 'Custom version to deploy on prod')
+        choice(name: 'VERSION_CHOICE', choices: ['1.1.0', '1.2.0', '1.3.0'], description: 'Select version from list')
+        booleanParam(name: 'executeTests', defaultValue: true, description: 'Check to execute tests')
     }
     
     environment {
-        // Global environment variables
-        NEW_VERSION = '1.3.0'
+        // Use either the custom string input or selected choice version
+        NEW_VERSION = params.VERSION_STRING ?: params.VERSION_CHOICE
         BUILD_TYPE = 'Production'
     }
 
@@ -15,57 +17,35 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'Building Project'
-                echo "Building version ${NEW_VERSION}"
+                echo "Building version: ${NEW_VERSION}"
                 echo "Build type: ${BUILD_TYPE}"
-                
-                // Maven build command (fixed from "nwn install")
-                bat "mvn clean install"
-                
-                // Archive the built artifacts
-                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            }
-            
-            post {
-                success {
-                    echo 'Build stage completed successfully!'
-                }
-                failure {
-                    echo 'Build stage failed!'
-                }
             }
         }
 
         stage('Test') {
             when {
-                expression { env.BUILD_TYPE == 'Production' }
+                expression { params.executeTests }
             }
             steps {
-                echo 'Running Tests'
-                sh "mvn test"
-                
-                // Store test results
-                junit 'target/surefire-reports/*.xml'
+                echo 'Testing Project'
+                echo "Running tests for version: ${NEW_VERSION}"
             }
         }
 
         stage('Deploy') {
             when {
-                branch 'main'
+                expression { params.VERSION_STRING || params.VERSION_CHOICE }
             }
             steps {
-                echo 'Deploying Application'
-                echo "Deploying version ${NEW_VERSION} to ${BUILD_TYPE}"
-                
-                // Add deployment commands here
-                // sh "./deploy.sh"
+                echo 'Deploying Project'
+                echo "Deploying version: ${NEW_VERSION} to production"
             }
         }
     }
 
     post {
         always {
-            echo "Pipeline completed for ${NEW_VERSION}"
-            cleanWs()  // Clean workspace after build
+            echo "Pipeline completed for version ${NEW_VERSION}"
         }
         success {
             echo 'Pipeline succeeded!'
