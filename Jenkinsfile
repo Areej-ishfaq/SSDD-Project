@@ -1,16 +1,12 @@
-// Define flag properly to avoid memory leak warning
 def flag = true
 
 pipeline {
     agent any
     
-    // Global environment variables
     environment {
         URL_VERSION = "1.3.0"
         BUILD_NOTE  = "Prod-Ready"
         IS_FLAGGED  = "${flag}"
-        // Remove credentials() if not properly configured in Jenkins
-        // AWS_ACCESS_KEY_ID = credentials('AWS_ACCESS_KEY_ID') 
     }
 
     stages {
@@ -23,7 +19,8 @@ pipeline {
                 echo "Using global URL_VERSION: ${URL_VERSION}"
                 echo "Stage-specific var: ${STAGE_SPECIFIC}"
                 echo "Flag status: ${IS_FLAGGED}"
-                sh 'echo "Build note: $BUILD_NOTE"'
+                // Use bat instead of sh for Windows
+                bat 'echo "Build note: %BUILD_NOTE%"'
             }
         }
 
@@ -39,7 +36,6 @@ pipeline {
             }
             steps {
                 echo 'Testing Project'
-                // echo "AWS Key: ${AWS_ACCESS_KEY_ID}"  // Comment out until credentials are set up
             }
         }
 
