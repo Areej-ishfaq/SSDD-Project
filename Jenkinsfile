@@ -7,6 +7,19 @@ pipeline {
                 echo 'Building the project...'
             }
         }
+
+        stage('Test') {
+            steps {
+                echo 'Testing Project'
+                script {
+                    // Example conditional logic (replace with actual test commands)
+                    def testPassed = true // Simulate test result
+                    if (!testPassed) {
+                        error "Tests failed!" // Marks build as "failed"
+                    }
+                }
+            }
+        }
         
         stage('Deploy') {
             steps {
