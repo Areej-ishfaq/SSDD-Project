@@ -19,7 +19,7 @@ pipeline {
                 echo "Build type: ${BUILD_TYPE}"
                 
                 // Maven build command (fixed from "nwn install")
-                sh "mvn clean install"
+                bat "mvn clean install"
                 
                 // Archive the built artifacts
                 archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
