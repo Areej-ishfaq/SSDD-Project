@@ -1,74 +1,77 @@
-def flag = true
-
 pipeline {
     agent any
     
+    tools {
+        maven 'Maven'  // Name of Maven tool configured in Jenkins
+    }
+    
     environment {
-        URL_VERSION = "1.3.0"
-        BUILD_NOTE  = "Prod-Ready"
-        IS_FLAGGED  = "${flag}"
+        // Global environment variables
+        NEW_VERSION = '1.3.0'
+        BUILD_TYPE = 'Production'
     }
 
     stages {
         stage('Build') {
-            environment {
-                STAGE_SPECIFIC = "build-${env.BUILD_ID}"
-            }
             steps {
-                echo 'Building the project...'
-                echo "Using global URL_VERSION: ${URL_VERSION}"
-                echo "Stage-specific var: ${STAGE_SPECIFIC}"
-                echo "Flag status: ${IS_FLAGGED}"
-                // Use bat instead of sh for Windows
-                bat 'echo "Build note: %BUILD_NOTE%"'
+                echo 'Building Project'
+                echo "Building version ${NEW_VERSION}"
+                echo "Build type: ${BUILD_TYPE}"
+                
+                // Maven build command (fixed from "nwn install")
+                sh "mvn clean install"
+                
+                // Archive the built artifacts
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+            
+            post {
+                success {
+                    echo 'Build stage completed successfully!'
+                }
+                failure {
+                    echo 'Build stage failed!'
+                }
             }
         }
 
         stage('Test') {
             when {
-                allOf {
-                    expression { flag == true }
-                    anyOf {
-                        branch 'main'
-                        environment name: 'RUN_TESTS', value: 'true'
-                    }
-                }
+                expression { env.BUILD_TYPE == 'Production' }
             }
             steps {
-                echo 'Testing Project'
+                echo 'Running Tests'
+                sh "mvn test"
+                
+                // Store test results
+                junit 'target/surefire-reports/*.xml'
             }
         }
 
         stage('Deploy') {
             when {
-                allOf {
-                    expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-                    branch 'main'
-                }
-            }
-            environment {
-                TARGET_ENV = "production"
+                branch 'main'
             }
             steps {
-                echo 'Deploying Project'
-                echo "Target: ${TARGET_ENV}, Version: ${URL_VERSION}"
+                echo 'Deploying Application'
+                echo "Deploying version ${NEW_VERSION} to ${BUILD_TYPE}"
+                
+                // Add deployment commands here
+                // sh "./deploy.sh"
             }
         }
     }
 
     post {
         always {
-            echo "Post build condition running (always executes)"
-            echo "Build completed for version ${URL_VERSION}"
+            echo "Pipeline completed for ${NEW_VERSION}"
+            cleanWs()  // Clean workspace after build
         }
         success {
-            echo 'Build succeeded!'
+            echo 'Pipeline succeeded!'
         }
         failure {
-            echo 'Post Action: Build failed!'
-        }
-        unstable {
-            echo 'Build is unstable!'
+            echo 'Pipeline failed!'
         }
     }
 }
