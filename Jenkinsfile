@@ -1,35 +1,34 @@
-// Define a global flag (optional)
-flag = true
+// Define flag properly to avoid memory leak warning
+def flag = true
 
 pipeline {
     agent any
     
-    // Global environment variables (accessible in ALL stages)
+    // Global environment variables
     environment {
-        URL_VERSION = "1.3.0"                  // Hardcoded value
-        BUILD_NOTE  = "Prod-Ready"             // Static value
-        IS_FLAGGED  = "${flag}"                // Reference Groovy variable
-        CREDENTIALS = credentials('AWS_ACCESS_KEY_ID')  // Jenkins credentials
+        URL_VERSION = "1.3.0"
+        BUILD_NOTE  = "Prod-Ready"
+        IS_FLAGGED  = "${flag}"
+        // Remove credentials() if not properly configured in Jenkins
+        // AWS_ACCESS_KEY_ID = credentials('AWS_ACCESS_KEY_ID') 
     }
 
     stages {
         stage('Build') {
-            // Stage-specific environment variable
             environment {
                 STAGE_SPECIFIC = "build-${env.BUILD_ID}"
             }
             steps {
                 echo 'Building the project...'
-                echo "Using global URL_VERSION: ${env.URL_VERSION}"
-                echo "Stage-specific var: ${env.STAGE_SPECIFIC}"
-                echo "Flag status: ${env.IS_FLAGGED}"
-                sh 'echo "Build note: $BUILD_NOTE"'  // Access in shell script
+                echo "Using global URL_VERSION: ${URL_VERSION}"
+                echo "Stage-specific var: ${STAGE_SPECIFIC}"
+                echo "Flag status: ${IS_FLAGGED}"
+                sh 'echo "Build note: $BUILD_NOTE"'
             }
         }
 
         stage('Test') {
             when {
-                // Combined conditions: flag == true AND (branch is main OR RUN_TESTS env var set)
                 allOf {
                     expression { flag == true }
                     anyOf {
@@ -40,24 +39,23 @@ pipeline {
             }
             steps {
                 echo 'Testing Project'
-                echo "AWS Key: ${env.CREDENTIALS}"  // Securely injected
+                // echo "AWS Key: ${AWS_ACCESS_KEY_ID}"  // Comment out until credentials are set up
             }
         }
 
         stage('Deploy') {
             when {
-                // Run only if previous stages succeeded AND branch is main
                 allOf {
                     expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
                     branch 'main'
                 }
             }
             environment {
-                TARGET_ENV = "production"  // Deploy-specific variable
+                TARGET_ENV = "production"
             }
             steps {
                 echo 'Deploying Project'
-                echo "Target: ${env.TARGET_ENV}, Version: ${env.URL_VERSION}"
+                echo "Target: ${TARGET_ENV}, Version: ${URL_VERSION}"
             }
         }
     }
@@ -65,7 +63,7 @@ pipeline {
     post {
         always {
             echo "Post build condition running (always executes)"
-            echo "Build completed for version ${env.URL_VERSION}"
+            echo "Build completed for version ${URL_VERSION}"
         }
         success {
             echo 'Build succeeded!'
