@@ -41,11 +41,11 @@ The application incorporates user authentication, task CRUD operations, and impl
 
 ## Installation
 1. Clone the repository:
-   git clone [repository-url]
+   git clone [repository-url] , 
    cd [repository]
 
 2. Create a virtual environment:
-   python -m venv venv
+   python -m venv venv , 
    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
 
 3. Install dependencies:
